@@ -1,0 +1,124 @@
+✅ Batch 2.1 Deliverable for Replit
+/services/buddyMatch.ts
+import { db } from "../db";
+import { users, matches } from "../db/schema";
+import { eq, sql } from "drizzle-orm";
+
+export async function findBuddyMatches(userId: number, speedTolerance = 1.5) {
+  const [athlete] = await db.select().from(users).where(eq(users.id, userId));
+  if (!athlete) throw new Error("User not found");
+
+  let results;
+
+  if (athlete.sensor_class === "power-meter" && athlete.ftp_watts) {
+    const tolerance = athlete.ftp_tolerance_pct || 20; // default 20%
+    const lowerBound = Number(athlete.ftp_watts) * (1 - tolerance / 100);
+    const upperBound = Number(athlete.ftp_watts) * (1 + tolerance / 100);
+
+    results = await db.execute(sql`
+      SELECT u.id, u.name, u.ftp_watts, u.weight_kg, u.location, u.ride_type
+      FROM users u
+      WHERE u.id != ${userId}
+        AND u.sensor_class = 'power-meter'
+        AND u.location = ${athlete.location}
+        AND u.ftp_watts BETWEEN ${lowerBound} AND ${upperBound}
+      ORDER BY ABS(u.ftp_watts - ${athlete.ftp_watts})
+      LIMIT 10
+    `);
+  } else {
+    results = await db.execute(sql`
+      SELECT u.id, u.name, u.avg_speed_mph, u.location, u.ride_type
+      FROM users u
+      WHERE u.id != ${userId}
+        AND u.sensor_class = 'non-sensor'
+        AND u.location = ${athlete.location}
+        AND ABS(u.avg_speed_mph::numeric - ${athlete.avg_speed_mph}::numeric) <= ${speedTolerance}
+      ORDER BY ABS(u.avg_speed_mph::numeric - ${athlete.avg_speed_mph}::numeric)
+      LIMIT 10
+    `);
+  }
+
+  const matchesWithReason = results.rows.map((r: any) => {
+    let compatibility = 0;
+    let reason = "";
+
+    if (athlete.sensor_class === "power-meter") {
+      const delta = Math.abs(Number(r.ftp_watts) - Number(athlete.ftp_watts));
+      compatibility = Math.max(0, 100 - (delta / athlete.ftp_watts) * 100);
+      reason = `Matched on FTP ±${((delta / athlete.ftp_watts) * 100).toFixed(1)}%, tolerance set to ${athlete.ftp_tolerance_pct || 20}%`;
+    } else {
+      const delta = Math.abs(Number(r.avg_speed_mph) - Number(athlete.avg_speed_mph));
+      compatibility = Math.max(0, 100 - delta * 10);
+      reason = `Matched on speed ±${delta.toFixed(1)} mph, same city`;
+    }
+
+    return {
+      ...r,
+      sensor_class: athlete.sensor_class,
+      compatibility: Math.round(compatibility),
+      match_reason: reason,
+    };
+  });
+
+  return matchesWithReason;
+}
+
+/routes/match.ts
+import express from "express";
+import { findBuddyMatches } from "../services/buddyMatch";
+
+const router = express.Router();
+
+// GET /match/:userId
+router.get("/:userId", async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  if (isNaN(userId)) return res.status(400).json({ error: "Invalid userId" });
+
+  try {
+    const buddies = await findBuddyMatches(userId);
+    res.json(buddies);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+export default router;
+
+
+👉 Wire into your app.ts or index.ts:
+
+import matchRoutes from "./routes/match";
+app.use("/match", matchRoutes);
+
+Example Response (PM athlete)
+[
+  {
+    "id": 42,
+    "name": "Ben",
+    "ftp_watts": 250,
+    "weight_kg": 70,
+    "location": "San Jose",
+    "ride_type": "Road",
+    "sensor_class": "power-meter",
+    "compatibility": 94,
+    "match_reason": "Matched on FTP ±8.0%, tolerance set to 20%"
+  }
+]
+
+Example Response (non-sensor athlete)
+[
+  {
+    "id": 18,
+    "name": "Chris",
+    "avg_speed_mph": 16.9,
+    "location": "San Jose",
+    "ride_type": "Gravel",
+    "sensor_class": "non-sensor",
+    "compatibility": 96,
+    "match_reason": "Matched on speed ±0.6 mph, same city"
+  }
+]
+
+
+📌 Instruction to Replit Agent:
+“Please add these two files (services/buddyMatch.ts, routes/match.ts) and wire /match/:userId into the Express app. Make sure to include sensor_class and ftp_tolerance_pct in the user schema. Return matches with compatibility and match_reason.”

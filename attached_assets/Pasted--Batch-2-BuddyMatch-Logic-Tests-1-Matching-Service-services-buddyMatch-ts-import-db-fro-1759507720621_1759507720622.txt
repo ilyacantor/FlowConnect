@@ -1,0 +1,125 @@
+✅ Batch 2 – BuddyMatch Logic + Tests
+1. Matching Service (/services/buddyMatch.ts)
+import { db } from "../db";
+import { users, matches } from "../db/schema";
+import { eq, and, sql } from "drizzle-orm";
+
+export async function findBuddyMatches(
+  userId: number,
+  speedTolerance = 1.5
+) {
+  // 1. Get this athlete
+  const [athlete] = await db.select().from(users).where(eq(users.id, userId));
+  if (!athlete) throw new Error("User not found");
+
+  // 2. Find others in same city, overlapping day, within speed tolerance
+  const results = await db.execute(sql`
+    SELECT u.id, u.name, u.avg_speed_mph, u.location, u.weekly_miles
+    FROM users u
+    WHERE u.id != ${userId}
+      AND u.location = ${athlete.location}
+      AND ABS(u.avg_speed_mph::numeric - ${athlete.avg_speed_mph}::numeric) <= ${speedTolerance}
+    ORDER BY ABS(u.avg_speed_mph::numeric - ${athlete.avg_speed_mph}::numeric)
+    LIMIT 10
+  `);
+
+  // 3. Save to matches table
+  for (const r of results.rows) {
+    const matchScore = Math.max(
+      0,
+      100 -
+        Math.abs(Number(r.avg_speed_mph) - Number(athlete.avg_speed_mph)) * 10
+    ); // crude scoring: 100 minus speed delta × 10
+
+    await db.insert(matches).values({
+      user_id: userId,
+      buddy_id: r.id,
+      match_score: matchScore,
+    });
+  }
+
+  return results.rows;
+}
+
+2. Simple API Endpoint (/routes/match.ts)
+import express from "express";
+import { findBuddyMatches } from "../services/buddyMatch";
+
+const router = express.Router();
+
+// GET /match/:userId
+router.get("/:userId", async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  if (isNaN(userId)) return res.status(400).json({ error: "Invalid userId" });
+
+  try {
+    const buddies = await findBuddyMatches(userId);
+    res.json(buddies);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+export default router;
+
+
+👉 Wire into your Express app (likely /src/index.ts or /app.ts):
+
+import matchRoutes from "./routes/match";
+app.use("/match", matchRoutes);
+
+3. Unit Test (/tests/buddyMatch.test.ts)
+
+Uses Jest (already common in Node setups — install if not present: npm install --save-dev jest ts-jest @types/jest).
+
+import { findBuddyMatches } from "../services/buddyMatch";
+import { db } from "../db";
+import { users } from "../db/schema";
+
+describe("BuddyMatch Service", () => {
+  let testUserId: number;
+
+  beforeAll(async () => {
+    // Insert a test user
+    const [u] = await db.insert(users).values({
+      name: "TestRider",
+      email: "test@example.com",
+      location: "San Jose",
+      avg_speed_mph: 17.5,
+      weekly_miles: 100,
+      ftp_watts: 200,
+      ride_type: "Road",
+      badges: [],
+    }).returning({ id: users.id });
+
+    testUserId = u.id;
+
+    // Insert a close-match buddy
+    await db.insert(users).values({
+      name: "CloseBuddy",
+      email: "close@example.com",
+      location: "San Jose",
+      avg_speed_mph: 18.0,
+      weekly_miles: 90,
+      ftp_watts: 195,
+      ride_type: "Road",
+      badges: [],
+    });
+  });
+
+  it("finds buddies within 1.5 mph in same city", async () => {
+    const matches = await findBuddyMatches(testUserId);
+    expect(matches.length).toBeGreaterThan(0);
+    expect(matches[0].name).toBe("CloseBuddy");
+  });
+});
+
+4. Add Test Script in package.json
+"scripts": {
+  "test": "jest"
+}
+
+
+Run:
+
+npm run test

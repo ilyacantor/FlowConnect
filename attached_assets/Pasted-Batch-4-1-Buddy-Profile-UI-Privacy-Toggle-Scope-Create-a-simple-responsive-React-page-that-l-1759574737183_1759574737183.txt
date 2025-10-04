@@ -1,0 +1,175 @@
+Batch 4.1 — Buddy Profile UI + Privacy Toggle
+✅ Scope
+
+Create a simple, responsive React page that lets users:
+
+View and edit their buddy-matching preferences (fields from Batch 4.0).
+
+Toggle “Looking for Buddy” and “Visible in Passive Pool”.
+
+Save → PATCH / api/profile.
+
+Provide immediate visual feedback (✅ Saved / ⚠️ Error).
+
+1️⃣ API Route (/routes/profile.ts)
+import express from "express";
+import { db } from "../db";
+import { users } from "../db/schema";
+import { eq } from "drizzle-orm";
+
+const router = express.Router();
+
+// GET /api/profile/:userId
+router.get("/:userId", async (req, res) => {
+  const id = parseInt(req.params.userId);
+  const [u] = await db.select().from(users).where(eq(users.id, id));
+  if (!u) return res.status(404).json({ error: "User not found" });
+  res.json(u);
+});
+
+// PATCH /api/profile/:userId
+router.patch("/:userId", async (req, res) => {
+  const id = parseInt(req.params.userId);
+  try {
+    await db.update(users).set(req.body).where(eq(users.id, id));
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+export default router;
+
+
+Wire it in app.ts:
+
+import profileRoutes from "./routes/profile";
+app.use("/api/profile", profileRoutes);
+
+2️⃣ Frontend Page (/src/pages/ProfilePreferences.tsx)
+import React, { useState, useEffect } from "react";
+
+export default function ProfilePreferences({ userId = 5 }) {
+  const [form, setForm] = useState<any>(null);
+  const [status, setStatus] = useState("");
+
+  useEffect(() => {
+    fetch(`/api/profile/${userId}`)
+      .then(r => r.json())
+      .then(setForm);
+  }, [userId]);
+
+  const save = async () => {
+    setStatus("Saving…");
+    const res = await fetch(`/api/profile/${userId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form)
+    });
+    setStatus(res.ok ? "✅ Saved!" : "⚠️ Error saving");
+  };
+
+  if (!form) return <div>Loading…</div>;
+
+  const update = (k:string,v:any)=>setForm({ ...form, [k]:v });
+
+  return (
+    <div className="max-w-xl mx-auto p-6">
+      <h1 className="text-xl font-bold mb-4">My Buddy Preferences</h1>
+
+      <label className="block mb-2">
+        Pace Zone
+        <select value={form.pace_zone} onChange={e=>update("pace_zone",e.target.value)}
+          className="border p-2 w-full">
+          <option value="NoPref">No Preference</option>
+          <option value="Z1">Recovery (0–59%)</option>
+          <option value="Z2">Endurance (60–79%)</option>
+          <option value="Z3">Tempo (80–90%)</option>
+          <option value="Z4">Threshold + (91%+)</option>
+        </select>
+      </label>
+
+      <label className="block mb-2">
+        Elevation Preference
+        <select value={form.elevation_pref}
+          onChange={e=>update("elevation_pref",e.target.value)}
+          className="border p-2 w-full">
+          <option value="NoPref">No Preference</option>
+          <option value="flat">Flat</option>
+          <option value="rolling">Rolling</option>
+          <option value="hilly">Hilly</option>
+        </select>
+      </label>
+
+      <label className="block mb-2">
+        Ride Type
+        <select value={form.ride_type_pref}
+          onChange={e=>update("ride_type_pref",e.target.value)}
+          className="border p-2 w-full">
+          <option value="any">Any</option>
+          <option value="road">Road</option>
+          <option value="gravel">Gravel</option>
+          <option value="mtb">MTB</option>
+        </select>
+      </label>
+
+      <label className="block mb-2">
+        Max Distance (mi)
+        <input type="number" value={form.max_distance_mi}
+          onChange={e=>update("max_distance_mi",+e.target.value)}
+          className="border p-2 w-full" />
+      </label>
+
+      <label className="block mb-2">
+        Social Preference
+        <select value={form.social_pref}
+          onChange={e=>update("social_pref",e.target.value)}
+          className="border p-2 w-full">
+          <option value="social">I’m a social rider</option>
+          <option value="solo">I prefer solo rides</option>
+          <option value="flexible">No preference</option>
+        </select>
+      </label>
+
+      <div className="flex items-center gap-4 mt-4">
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={form.active_buddy_search}
+            onChange={e=>update("active_buddy_search",e.target.checked)} />
+          Looking for a Buddy 👍
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={form.visible_in_passive_pool}
+            onChange={e=>update("visible_in_passive_pool",e.target.checked)} />
+          Visible to others 👀
+        </label>
+      </div>
+
+      <button onClick={save}
+        className="mt-6 bg-blue-600 text-white px-4 py-2 rounded">
+        Save Preferences
+      </button>
+      <p className="mt-2 text-sm">{status}</p>
+    </div>
+  );
+}
+
+
+Wire in router:
+
+<Route path="/profile" element={<ProfilePreferences />} />
+
+3️⃣ Behavior
+
+Loads current user data via GET /api/profile/:id.
+
+User edits dropdowns/toggles.
+
+PATCH updates row in users table.
+
+Checkboxes directly map to active_buddy_search and visible_in_passive_pool.
+
+4️⃣ Replit Instructions
+# Ensure profile routes added
+npx tsx scripts/seed_users_criteria.ts  # if you need new sample users
+npm run dev  # run backend + frontend
+# Visit /profile  → edit → Save Preferences → check DB update

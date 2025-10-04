@@ -1,0 +1,82 @@
+Correct Approach for FlowConnect (Node/TS + Drizzle ORM)
+
+We should switch to a TypeScript seeding script that fits into your Drizzle + Postgres stack.
+
+That will look like:
+
+1. Install JS Faker
+npm install @faker-js/faker
+
+2. Create a seed.ts (or scripts/seed.ts)
+import { faker } from "@faker-js/faker";
+import { db } from "../db";  // adjust to your Drizzle db connection
+import { users, rides, posts, clubs, matches } from "../db/schema";
+
+async function seed() {
+  // --- Users ---
+  for (let i = 0; i < 100; i++) {
+    await db.insert(users).values({
+      name: faker.person.firstName(),
+      email: faker.internet.email(),
+      location: faker.helpers.arrayElement(["San Jose", "Palo Alto", "Los Gatos", "Sunnyvale", "Mountain View"]),
+      avg_speed_mph: faker.number.float({ min: 14, max: 22, precision: 0.1 }),
+      weekly_miles: faker.number.int({ min: 50, max: 200 }),
+      ftp_watts: faker.number.int({ min: 150, max: 300 }),
+      ride_type: faker.helpers.arrayElement(["Road", "Gravel", "MTB"]),
+      badges: []
+    });
+  }
+
+  // --- Rides ---
+  for (let i = 0; i < 20; i++) {
+    const avg_speed = faker.number.float({ min: 14, max: 22, precision: 0.1 });
+    const tier = avg_speed >= 20 ? "A" : avg_speed >= 17 ? "B" : "C";
+    const drop_policy = tier === "A" ? "Drop" : tier === "B" ? "Regroup" : "No-drop";
+
+    await db.insert(rides).values({
+      name: `${faker.helpers.arrayElement(["San Jose","Palo Alto","Los Gatos"])} ${tier} Ride ${i+1}`,
+      location: faker.helpers.arrayElement(["San Jose", "Palo Alto", "Los Gatos", "Sunnyvale", "Mountain View"]),
+      avg_speed_mph: avg_speed,
+      day: faker.helpers.arrayElement(["Sat", "Sun"]),
+      tier,
+      drop_policy
+    });
+  }
+
+  // --- Posts ---
+  for (let i = 0; i < 50; i++) {
+    await db.insert(posts).values({
+      user_id: faker.number.int({ min: 1, max: 100 }),
+      ride_id: faker.number.int({ min: 1, max: 20 }),
+      content: faker.helpers.arrayElement([
+        "Great group ride today!",
+        "Coffee stop at mile 20 was perfect.",
+        "Felt strong on the climbs.",
+        "New PR on the local loop!",
+        "No-drop ride with new friends 🚴"
+      ]),
+      photos: [],
+      kudos_count: faker.number.int({ min: 0, max: 42 })
+    });
+  }
+
+  console.log("✅ Seeded 100 users, 20 rides, 50 posts.");
+}
+
+seed().then(() => process.exit(0));
+
+3. Run the Seeder
+
+In your package.json, add:
+
+"scripts": {
+  "seed": "ts-node scripts/seed.ts"
+}
+
+
+Then run:
+
+npm run seed
+
+
+📌 Result: You’ll get the same 100/20/50 seeded data, but natively in your TypeScript + Drizzle ORM stack — no Python required.

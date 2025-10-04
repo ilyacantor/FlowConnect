@@ -1,0 +1,167 @@
+Batch 4.2 (Updated) — Buddy Finder UI (Broad Matching)
+✅ Scope
+
+UI for /buddies/search where a rider sets real-time filters (intent).
+
+Backend returns all matches, ranked by compatibility, no cutoff.
+
+Output only shows friendly profile info (no watts/speed).
+
+Active pool (👍) vs. passive pool (👀) clearly distinguished.
+
+DM toggle visible but inactive (future hook).
+
+Copy reflects openness: “A match is a match.”
+
+1️⃣ API Update (/routes/match.ts)
+
+Return broad results split into active/passive:
+
+router.get("/:userId", async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  if (isNaN(userId)) return res.status(400).json({ error: "Invalid userId" });
+
+  try {
+    const matches = await findBuddyMatches(userId);
+
+    const active = matches.filter(m => m.is_active);
+    const passive = matches.filter(m => !m.is_active);
+
+    res.json({
+      active,
+      passive,
+      total: matches.length
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+2️⃣ React Page (/src/pages/BuddyFinder.tsx)
+import React, { useState, useEffect } from "react";
+
+export default function BuddyFinder({ userId = 5 }) {
+  const [filters, setFilters] = useState({
+    pace_zone: "NoPref",
+    elevation_pref: "NoPref",
+    ride_type: "any",
+    max_distance_mi: 60,
+    ride_date: ""
+  });
+  const [results, setResults] = useState<{active:any[], passive:any[]}>({active:[], passive:[]});
+  const [loading, setLoading] = useState(false);
+
+  const search = async () => {
+    setLoading(true);
+    const res = await fetch(`/api/match/${userId}`);
+    const data = await res.json();
+    setResults({ active: data.active, passive: data.passive });
+    setLoading(false);
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto p-6">
+      <h1 className="text-2xl font-bold mb-4">Buddy Finder</h1>
+      <p className="text-gray-600 mb-6">
+        Best fits are shown first — but all nearby riders are visible. A match is a match.
+      </p>
+
+      {/* Filters */}
+      <div className="grid grid-cols-2 gap-4 mb-6 bg-gray-50 p-4 rounded">
+        <select value={filters.pace_zone}
+          onChange={e=>setFilters({...filters, pace_zone:e.target.value})}
+          className="border p-2">
+          <option value="NoPref">No Pace Preference</option>
+          <option value="Z1">Zone 1 – Recovery</option>
+          <option value="Z2">Zone 2 – Endurance</option>
+          <option value="Z3">Zone 3 – Tempo</option>
+          <option value="Z4">Zone 4+ – Threshold</option>
+        </select>
+
+        <select value={filters.elevation_pref}
+          onChange={e=>setFilters({...filters, elevation_pref:e.target.value})}
+          className="border p-2">
+          <option value="NoPref">No Elevation Preference</option>
+          <option value="flat">Flat</option>
+          <option value="rolling">Rolling</option>
+          <option value="hilly">Hilly</option>
+        </select>
+
+        <select value={filters.ride_type}
+          onChange={e=>setFilters({...filters, ride_type:e.target.value})}
+          className="border p-2">
+          <option value="any">Any Ride Type</option>
+          <option value="road">Road</option>
+          <option value="gravel">Gravel</option>
+          <option value="mtb">MTB</option>
+        </select>
+
+        <input type="number" className="border p-2"
+          value={filters.max_distance_mi}
+          onChange={e=>setFilters({...filters, max_distance_mi:+e.target.value})}
+          placeholder="Max Distance (mi)" />
+
+        <input type="date" className="border p-2 col-span-2"
+          value={filters.ride_date}
+          onChange={e=>setFilters({...filters, ride_date:e.target.value})} />
+
+        <button onClick={search}
+          className="col-span-2 bg-blue-600 text-white p-2 rounded">
+          Find Buddies
+        </button>
+      </div>
+
+      {loading && <p>Loading matches…</p>}
+
+      {/* Active Matches */}
+      <h2 className="text-lg font-semibold mb-2">Looking for a Buddy 👍</h2>
+      {results.active.length === 0 && <p className="text-gray-500">No active searchers right now.</p>}
+      <ul className="space-y-3 mb-6">
+        {results.active.map(b => (
+          <li key={b.id} className="border p-3 rounded bg-green-50">
+            <strong>{b.name}</strong> — {b.city}<br/>
+            Pace: {b.pace_zone}, Elevation: {b.elevation_pref}, Type: {b.ride_type_pref}
+          </li>
+        ))}
+      </ul>
+
+      {/* Passive Matches */}
+      <h2 className="text-lg font-semibold mb-2">Potential Matches 👀</h2>
+      {results.passive.length === 0 && <p className="text-gray-500">No passive matches yet.</p>}
+      <ul className="space-y-3">
+        {results.passive.map(b => (
+          <li key={b.id} className="border p-3 rounded bg-gray-50">
+            <strong>{b.name}</strong> — {b.city}<br/>
+            Pace: {b.pace_zone}, Elevation: {b.elevation_pref}, Type: {b.ride_type_pref}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+3️⃣ UX Copy
+
+Title: Buddy Finder
+
+Subtitle: “Best fits are shown first — but all nearby riders are visible. A match is a match.”
+
+Green cards = active searchers (👍).
+
+Gray cards = passive matches (👀).
+
+No watts, FTP, or speed shown.
+
+4️⃣ Replit Instructions
+# Ensure schema updated per 4.1b
+npx drizzle-kit generate
+npx drizzle-kit push
+
+# Seed
+npx tsx scripts/seed_users_criteria.ts
+
+# Run app
+npm run dev
+
+# Visit
+http://localhost:5173/buddies/search

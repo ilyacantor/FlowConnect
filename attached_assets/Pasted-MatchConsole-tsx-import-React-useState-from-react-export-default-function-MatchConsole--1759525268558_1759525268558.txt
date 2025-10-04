@@ -1,0 +1,107 @@
+MatchConsole.tsx
+import React, { useState } from "react";
+
+export default function MatchConsole() {
+  const [ftpWatts, setFtpWatts] = useState(250);
+  const [weightKg, setWeightKg] = useState(70);
+  const [weeklyHours, setWeeklyHours] = useState(8);
+  const [avgSpeed, setAvgSpeed] = useState(17);
+  const [results, setResults] = useState<any[]>([]);
+
+  const findMatches = async () => {
+    const body = {
+      ftp_watts: ftpWatts,
+      weight_kg: weightKg,
+      weekly_hours: weeklyHours,
+      avg_speed_mph: avgSpeed
+    };
+
+    const res = await fetch(`/api/match/simulate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    setResults(data);
+  };
+
+  return (
+    <div className="p-6">
+      <h1 className="text-xl font-bold mb-4">BuddyMatch Console</h1>
+
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <label>
+          FTP (watts):
+          <input
+            type="number"
+            value={ftpWatts}
+            onChange={(e) => setFtpWatts(Number(e.target.value))}
+            className="border p-2 w-full"
+          />
+        </label>
+        <label>
+          Weight (kg):
+          <input
+            type="number"
+            value={weightKg}
+            onChange={(e) => setWeightKg(Number(e.target.value))}
+            className="border p-2 w-full"
+          />
+        </label>
+        <label>
+          Weekly Hours:
+          <input
+            type="number"
+            value={weeklyHours}
+            onChange={(e) => setWeeklyHours(Number(e.target.value))}
+            className="border p-2 w-full"
+          />
+        </label>
+        <label>
+          Avg Speed (mph):
+          <input
+            type="number"
+            value={avgSpeed}
+            onChange={(e) => setAvgSpeed(Number(e.target.value))}
+            className="border p-2 w-full"
+          />
+        </label>
+      </div>
+
+      <button
+        onClick={findMatches}
+        className="bg-blue-500 text-white px-4 py-2 rounded"
+      >
+        Find My Matches
+      </button>
+
+      <ul className="mt-6 space-y-3">
+        {results.map((m) => (
+          <li key={m.id} className="border p-3 rounded">
+            <strong>{m.name}</strong> ({m.metric_used})<br />
+            Compatibility: {m.compatibility}%<br />
+            {m.match_reason}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+📝 Backend Stub (/routes/match.ts)
+
+Add a “simulate” route to let the console POST its values and compare against DB:
+
+router.post("/simulate", async (req, res) => {
+  const athlete = req.body; // { ftp_watts, weight_kg, weekly_hours, avg_speed_mph }
+
+  try {
+    const results = await findMatchesAgainstDb(athlete); // reuse your match logic
+    res.json(results);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+Where findMatchesAgainstDb(athlete) is just your BuddyMatch logic, but instead of looking up a userId, it uses the POSTed parameters as the “self” rider profile.

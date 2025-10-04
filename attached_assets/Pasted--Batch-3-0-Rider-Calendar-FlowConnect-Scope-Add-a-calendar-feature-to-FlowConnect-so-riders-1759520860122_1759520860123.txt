@@ -1,0 +1,160 @@
+📝 Batch 3.0 — Rider Calendar (FlowConnect)
+✅ Scope
+
+Add a calendar feature to FlowConnect so riders can see:
+
+External workouts (TP/Garmin/Strava stubs for now).
+
+Flownation-native entries (group rides, buddy sessions).
+
+Manual entries (rest days, coffee rides).
+
+Backend = new table calendar_entries, seeded with mixed data.
+
+1. Schema (/db/schema.ts)
+export const calendar_entries = pgTable("calendar_entries", {
+  id: serial("id").primaryKey(),
+  user_id: integer("user_id").references(() => users.id).notNull(),
+  source: varchar("source", { length: 50 }), // "TrainingPeaks", "Garmin", "Strava", "Manual", "Flownation"
+  type: varchar("type", { length: 50 }),     // "Ride", "Race", "Group Ride", "Workout", "Rest"
+  title: varchar("title", { length: 200 }),
+  date: date("date").notNull(),
+  duration_hours: numeric("duration_hours", { precision: 4, scale: 2 }),
+  distance_km: numeric("distance_km", { precision: 6, scale: 1 }),
+  tss: integer("tss"),                       // if available
+  ctl: integer("ctl"),
+  atl: integer("atl"),
+  route: jsonb("route"),                     // GPX/Strava/route object if available
+  buddies: jsonb("buddies").default([]),     // linked buddy IDs
+  created_at: timestamp("created_at").defaultNow()
+});
+
+2. Seeder (/scripts/seed_calendar.ts)
+import { faker } from "@faker-js/faker";
+import { db } from "../db";
+import { calendar_entries } from "../db/schema";
+
+function randomChoice<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+async function seedCalendar() {
+  for (let i = 0; i < 100; i++) {
+    const userId = faker.number.int({ min: 1, max: 100 });
+
+    await db.insert(calendar_entries).values({
+      user_id: userId,
+      source: randomChoice(["TrainingPeaks", "Garmin", "Strava", "Manual", "Flownation"]),
+      type: randomChoice(["Ride", "Race", "Group Ride", "Workout", "Rest"]),
+      title: randomChoice([
+        "Threshold Intervals",
+        "Coffee Ride",
+        "B Ride – 17-19 mph, no-drop",
+        "Leadville 2025 Prep",
+        "Sunday Gravel Spin"
+      ]),
+      date: faker.date.between({ from: "2025-09-01", to: "2025-12-31" }),
+      duration_hours: faker.number.float({ min: 1, max: 4, precision: 0.1 }),
+      distance_km: faker.number.float({ min: 20, max: 120, precision: 0.1 }),
+      tss: faker.number.int({ min: 30, max: 150 }),
+      ctl: faker.number.int({ min: 40, max: 100 }),
+      atl: faker.number.int({ min: 30, max: 110 }),
+      route: null,
+      buddies: []
+    });
+  }
+  console.log("✅ Seeded 100 calendar entries.");
+}
+
+seedCalendar().then(() => process.exit(0));
+
+3. API Route (/routes/calendar.ts)
+import express from "express";
+import { db } from "../db";
+import { calendar_entries } from "../db/schema";
+import { eq, and, gte, lte } from "drizzle-orm";
+
+const router = express.Router();
+
+// GET /calendar/:userId?from=2025-10-01&to=2025-10-31
+router.get("/:userId", async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  if (isNaN(userId)) return res.status(400).json({ error: "Invalid userId" });
+
+  const from = req.query.from as string;
+  const to = req.query.to as string;
+
+  try {
+    let query = db.select().from(calendar_entries).where(eq(calendar_entries.user_id, userId));
+    if (from && to) {
+      query = query.where(and(gte(calendar_entries.date, from), lte(calendar_entries.date, to)));
+    }
+    const entries = await query;
+    res.json(entries);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+export default router;
+
+
+Wire into app:
+
+import calendarRoutes from "./routes/calendar";
+app.use("/calendar", calendarRoutes);
+
+4. Example API Response
+[
+  {
+    "id": 12,
+    "user_id": 5,
+    "source": "TrainingPeaks",
+    "type": "Workout",
+    "title": "Threshold Intervals",
+    "date": "2025-10-07",
+    "duration_hours": 1.5,
+    "distance_km": 45.2,
+    "tss": 95,
+    "ctl": 72,
+    "atl": 68,
+    "route": null,
+    "buddies": []
+  },
+  {
+    "id": 13,
+    "user_id": 5,
+    "source": "Flownation",
+    "type": "Group Ride",
+    "title": "Sunday Gravel Spin",
+    "date": "2025-10-12",
+    "duration_hours": 3,
+    "distance_km": 70,
+    "tss": 110,
+    "ctl": null,
+    "atl": null,
+    "route": null,
+    "buddies": [7, 19]
+  }
+]
+
+5. Replit Instructions
+
+Add schema block to /db/schema.ts.
+
+Add seeder file /scripts/seed_calendar.ts.
+
+Add API route /routes/calendar.ts and wire with app.use("/calendar", calendarRoutes).
+
+Run seeder:
+
+npx tsx scripts/seed_calendar.ts
+
+
+Test endpoint:
+
+GET /calendar/5?from=2025-10-01&to=2025-10-31
+
+
+📌 Checkpoint:
+You should now be able to fetch a user’s month view populated with mixed entries (TP-style workouts, group rides, manual coffee rides).

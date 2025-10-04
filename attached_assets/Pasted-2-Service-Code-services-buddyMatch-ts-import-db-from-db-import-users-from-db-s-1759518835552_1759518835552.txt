@@ -1,0 +1,168 @@
+2. Service Code (/services/buddyMatch.ts)
+import { db } from "../db";
+import { users } from "../db/schema";
+import { eq, sql } from "drizzle-orm";
+
+export async function findBuddyMatches(userId: number) {
+  const [athlete] = await db.select().from(users).where(eq(users.id, userId));
+  if (!athlete) throw new Error("User not found");
+
+  const results = await db.execute(sql`
+    SELECT * FROM users u
+    WHERE u.id != ${userId}
+      AND u.location = ${athlete.location}
+    LIMIT 50
+  `);
+
+  const matches = results.rows.map((candidate: any) => {
+    let compatibility = 0;
+    let reason = "";
+    let metricUsed = "";
+
+    if (athlete.ftp_wkg && candidate.ftp_wkg) {
+      // FTP w/kg match
+      const tolerance = athlete.ftp_tolerance_pct || 20;
+      const lower = athlete.ftp_wkg * (1 - tolerance / 100);
+      const upper = athlete.ftp_wkg * (1 + tolerance / 100);
+      if (candidate.ftp_wkg >= lower && candidate.ftp_wkg <= upper) {
+        const deltaPct = Math.abs((candidate.ftp_wkg - athlete.ftp_wkg) / athlete.ftp_wkg) * 100;
+        compatibility = Math.max(0, 100 - deltaPct);
+        reason = `Matched on FTP ${athlete.ftp_wkg} w/kg ±${deltaPct.toFixed(1)}%, tolerance ${tolerance}%`;
+        metricUsed = "ftp_wkg";
+      }
+    } else if (athlete.ftp_watts && candidate.ftp_watts) {
+      // FTP watts fallback
+      const tolerance = athlete.ftp_tolerance_pct || 20;
+      const lower = athlete.ftp_watts * (1 - tolerance / 100);
+      const upper = athlete.ftp_watts * (1 + tolerance / 100);
+      if (candidate.ftp_watts >= lower && candidate.ftp_watts <= upper) {
+        const deltaPct = Math.abs((candidate.ftp_watts - athlete.ftp_watts) / athlete.ftp_watts) * 100;
+        compatibility = Math.max(0, 100 - deltaPct);
+        reason = `Matched on FTP ${athlete.ftp_watts}w ±${deltaPct.toFixed(1)}%, tolerance ${tolerance}%`;
+        metricUsed = "ftp_watts";
+      }
+    } else if (athlete.weekly_hours && candidate.weekly_hours) {
+      // Weekly hours fallback
+      const delta = Math.abs(candidate.weekly_hours - athlete.weekly_hours);
+      const tolerance = athlete.weekly_hours * 0.25; // ±25%
+      if (delta <= tolerance) {
+        compatibility = Math.max(0, 100 - (delta / athlete.weekly_hours) * 100);
+        reason = `Matched on training volume ±${delta} hrs/week`;
+        metricUsed = "weekly_hours";
+      }
+    } else if (athlete.avg_speed_mph && candidate.avg_speed_mph) {
+      // MPH fallback
+      const delta = Math.abs(candidate.avg_speed_mph - athlete.avg_speed_mph);
+      if (delta <= 1.5) {
+        compatibility = Math.max(0, 100 - delta * 10);
+        reason = `Matched on speed ±${delta.toFixed(1)} mph, same city`;
+        metricUsed = "avg_speed_mph";
+      }
+    }
+
+    return {
+      id: candidate.id,
+      name: candidate.name,
+      location: candidate.location,
+      sensor_class: candidate.sensor_class,
+      compatibility: Math.round(compatibility),
+      match_reason: reason,
+      metric_used: metricUsed,
+    };
+  });
+
+  return matches.filter(m => m.compatibility > 0).sort((a, b) => b.compatibility - a.compatibility).slice(0, 10);
+}
+
+3. Test Cases (/tests/buddyMatch.test.ts)
+import { findBuddyMatches } from "../services/buddyMatch";
+import { db } from "../db";
+import { users } from "../db/schema";
+
+describe("BuddyMatch Hierarchy", () => {
+  let pmUserId: number;
+  let mphUserId: number;
+
+  beforeAll(async () => {
+    // Insert power-meter athlete
+    const [pmUser] = await db.insert(users).values({
+      name: "PowerAthlete",
+      email: "pm@test.com",
+      location: "San Jose",
+      ftp_watts: 250,
+      weight_kg: 70,
+      ftp_wkg: 3.57,
+      sensor_class: "power-meter",
+      ftp_tolerance_pct: 20,
+    }).returning({ id: users.id });
+    pmUserId = pmUser.id;
+
+    // Insert non-sensor athlete
+    const [mphUser] = await db.insert(users).values({
+      name: "MphAthlete",
+      email: "mph@test.com",
+      location: "San Jose",
+      avg_speed_mph: 17,
+      sensor_class: "non-sensor",
+    }).returning({ id: users.id });
+    mphUserId = mphUser.id;
+
+    // Candidate buddies
+    await db.insert(users).values([
+      { name: "ClosePM", email: "closepm@test.com", location: "San Jose", ftp_watts: 255, weight_kg: 71, ftp_wkg: 3.59, sensor_class: "power-meter" },
+      { name: "CloseMph", email: "closemph@test.com", location: "San Jose", avg_speed_mph: 17.2, sensor_class: "non-sensor" }
+    ]);
+  });
+
+  it("matches on FTP w/kg when available", async () => {
+    const matches = await findBuddyMatches(pmUserId);
+    expect(matches.length).toBeGreaterThan(0);
+    expect(matches[0].metric_used).toBe("ftp_wkg");
+  });
+
+  it("matches on MPH when no power data", async () => {
+    const matches = await findBuddyMatches(mphUserId);
+    expect(matches.length).toBeGreaterThan(0);
+    expect(matches[0].metric_used).toBe("avg_speed_mph");
+  });
+});
+
+4. API Response Spec
+
+Response includes:
+
+compatibility (0–100)
+
+match_reason (grassroots string)
+
+metric_used (ftp_wkg, ftp_watts, weekly_hours, avg_speed_mph)
+
+Example:
+
+[
+  {
+    "id": 45,
+    "name": "Clara",
+    "location": "San Jose",
+    "sensor_class": "power-meter",
+    "compatibility": 93,
+    "match_reason": "Matched on FTP 3.6 w/kg ±12%, tolerance 20%",
+    "metric_used": "ftp_wkg"
+  }
+]
+
+5. Replit Instructions
+
+Add /services/buddyMatch.ts and /tests/buddyMatch.test.ts.
+
+Wire route if not already:
+
+import matchRoutes from "./routes/match";
+app.use("/match", matchRoutes);
+
+
+Run seeder (npm run seed) to populate test athletes.
+
+Run tests (npm run test) → should pass FTP + MPH scenarios.
+
+📌 Checkpoint: Once seeded + tested, you should be able to hit /match/:userId and see compatibility based on FTP w/kg → FTP watts → weekly hours → mph, with explainable reasons.

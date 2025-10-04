@@ -1,0 +1,125 @@
+Batch 1 (TypeScript/Drizzle Package)
+
+You’ll want two main pieces:
+
+1. Schema (/db/schema.ts)
+import { pgTable, serial, varchar, integer, numeric, jsonb, timestamp } from "drizzle-orm/pg-core";
+
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  email: varchar("email", { length: 150 }).notNull().unique(),
+  location: varchar("location", { length: 100 }),
+  avg_speed_mph: numeric("avg_speed_mph", { precision: 4, scale: 1 }),
+  weekly_miles: integer("weekly_miles"),
+  ftp_watts: integer("ftp_watts"),
+  ride_type: varchar("ride_type", { length: 50 }), // Road, Gravel, MTB
+  badges: jsonb("badges").default([]),
+  created_at: timestamp("created_at").defaultNow(),
+});
+
+export const rides = pgTable("rides", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 150 }).notNull(),
+  location: varchar("location", { length: 100 }).notNull(),
+  avg_speed_mph: numeric("avg_speed_mph", { precision: 4, scale: 1 }),
+  day: varchar("day", { length: 10 }), // Sat/Sun
+  tier: varchar("tier", { length: 5 }), // A/B/C
+  drop_policy: varchar("drop_policy", { length: 20 }), // Drop, Regroup, No-drop
+  created_at: timestamp("created_at").defaultNow(),
+});
+
+export const posts = pgTable("posts", {
+  id: serial("id").primaryKey(),
+  user_id: integer("user_id").references(() => users.id),
+  ride_id: integer("ride_id").references(() => rides.id),
+  content: varchar("content", { length: 500 }),
+  photos: jsonb("photos").default([]),
+  kudos_count: integer("kudos_count").default(0),
+  created_at: timestamp("created_at").defaultNow(),
+});
+
+export const matches = pgTable("matches", {
+  id: serial("id").primaryKey(),
+  user_id: integer("user_id").references(() => users.id),
+  buddy_id: integer("buddy_id").references(() => users.id),
+  match_score: numeric("match_score", { precision: 5, scale: 2 }),
+  scheduled_time: timestamp("scheduled_time"),
+  created_at: timestamp("created_at").defaultNow(),
+});
+
+export const clubs = pgTable("clubs", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 150 }).notNull(),
+  location: varchar("location", { length: 100 }),
+  members: jsonb("members").default([]),
+  created_at: timestamp("created_at").defaultNow(),
+});
+
+2. Seeder (/scripts/seed.ts)
+import { faker } from "@faker-js/faker";
+import { db } from "../db"; // adjust to your db.ts path
+import { users, rides, posts } from "../db/schema";
+
+async function seed() {
+  // Seed users
+  for (let i = 0; i < 100; i++) {
+    await db.insert(users).values({
+      name: faker.person.firstName(),
+      email: faker.internet.email(),
+      location: faker.helpers.arrayElement(["San Jose", "Palo Alto", "Los Gatos", "Sunnyvale", "Mountain View"]),
+      avg_speed_mph: faker.number.float({ min: 14, max: 22, precision: 0.1 }),
+      weekly_miles: faker.number.int({ min: 50, max: 200 }),
+      ftp_watts: faker.number.int({ min: 150, max: 300 }),
+      ride_type: faker.helpers.arrayElement(["Road", "Gravel", "MTB"]),
+      badges: []
+    });
+  }
+
+  // Seed rides
+  for (let i = 0; i < 20; i++) {
+    const avg_speed = faker.number.float({ min: 14, max: 22, precision: 0.1 });
+    const tier = avg_speed >= 20 ? "A" : avg_speed >= 17 ? "B" : "C";
+    const drop_policy = tier === "A" ? "Drop" : tier === "B" ? "Regroup" : "No-drop";
+
+    await db.insert(rides).values({
+      name: `${faker.helpers.arrayElement(["San Jose","Palo Alto","Los Gatos"])} ${tier} Ride ${i+1}`,
+      location: faker.helpers.arrayElement(["San Jose", "Palo Alto", "Los Gatos", "Sunnyvale", "Mountain View"]),
+      avg_speed_mph: avg_speed,
+      day: faker.helpers.arrayElement(["Sat", "Sun"]),
+      tier,
+      drop_policy
+    });
+  }
+
+  // Seed posts
+  for (let i = 0; i < 50; i++) {
+    await db.insert(posts).values({
+      user_id: faker.number.int({ min: 1, max: 100 }),
+      ride_id: faker.number.int({ min: 1, max: 20 }),
+      content: faker.helpers.arrayElement([
+        "Great group ride today!",
+        "Coffee stop at mile 20 was perfect.",
+        "Felt strong on the climbs.",
+        "New PR on the local loop!",
+        "No-drop ride with new friends 🚴"
+      ]),
+      photos: [],
+      kudos_count: faker.number.int({ min: 0, max: 42 })
+    });
+  }
+
+  console.log("✅ Seeded 100 users, 20 rides, 50 posts.");
+}
+
+seed().then(() => process.exit(0));
+
+3. Add to package.json
+"scripts": {
+  "seed": "ts-node scripts/seed.ts"
+}
+
+
+Run it:
+
+npm run seed
