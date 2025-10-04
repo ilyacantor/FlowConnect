@@ -1,8 +1,21 @@
+# This section defines the build settings for your frontend.
 [build]
   command = "npm run build"
   publish = "dist"
 
+# This section tells Netlify where to find your backend serverless functions.
+[functions]
+  directory = "netlify/functions"
+
+# This redirect rule handles your React app's client-side routing.
 [[redirects]]
   from = "/*"
   to = "/index.html"
+  status = 200
+
+# This rule forwards all API requests to your backend function.
+# The server file is named "index.js", so the function is named "index".
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/index/:splat"
   status = 200
